@@ -8,6 +8,10 @@ class ProductCreate(BaseModel):
     category_id: int
     model_number: Optional[str] = None
     part_number: Optional[str] = None
+    description: Optional[str] = None
+
+class BrandCreate(BaseModel):
+    brand_name: str
 
 class BrandResponse(BaseModel):
     brand_id: int
@@ -15,6 +19,9 @@ class BrandResponse(BaseModel):
     
     class Config:
         orm_mode = True
+
+class CategoryCreate(BaseModel):
+    category_name: str
 
 class CategoryResponse(BaseModel):
     category_id: int
@@ -30,6 +37,7 @@ class ProductResponse(BaseModel):
     category: Optional[CategoryResponse] = None
     model_number: Optional[str] = None
     part_number: Optional[str] = None
+    description: Optional[str] = None
     
     class Config:
         orm_mode = True
