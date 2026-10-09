@@ -49,6 +49,34 @@ async def get_products(db: AsyncSession = Depends(get_db)):
     products = result.scalars().all()
     return products
 
+@router.delete("/products/{product_id}", summary="Eliminar un término de búsqueda")
+async def delete_product(product_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Product).where(Product.product_id == product_id))
+    product = result.scalars().first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
+    await db.delete(product)
+    await db.commit()
+    return {"message": "Producto eliminado exitosamente"}
+
+@router.put("/products/{product_id}", response_model=ProductResponse, summary="Actualizar un producto existente")
+async def update_product(product_id: int, product_data: ProductCreate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Product).where(Product.product_id == product_id))
+    product = result.scalars().first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
+    product.product_name = product_data.product_name
+    product.brand_id = product_data.brand_id
+    product.category_id = product_data.category_id
+    product.model_number = product_data.model_number
+    product.part_number = product_data.part_number
+    
+    await db.commit()
+    await db.refresh(product)
+    return product
+
 @router.get("/deals", summary="Obtener las mejores ofertas capturadas")
 async def get_best_deals(db: AsyncSession = Depends(get_db)):
     # Limitando a los ultimos 50 logs por ahora

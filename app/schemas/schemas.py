@@ -28,6 +28,8 @@ class ProductResponse(BaseModel):
     product_name: str
     brand: Optional[BrandResponse] = None
     category: Optional[CategoryResponse] = None
+    model_number: Optional[str] = None
+    part_number: Optional[str] = None
     
     class Config:
         orm_mode = True
