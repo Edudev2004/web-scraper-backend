@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+aiohttp
+beautifulsoup4
+python-dotenv
+
+apscheduler
+aiolimiter
