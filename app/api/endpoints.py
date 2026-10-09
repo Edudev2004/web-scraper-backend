@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
@@ -6,8 +6,18 @@ from typing import List
 from app.db.database import get_db
 from app.models.models import Product, ScrapingLog
 from app.schemas.schemas import ProductCreate, ProductResponse, DealResponse
+from app.scraper.workflow import run_automated_scraping_cycle
 
 router = APIRouter()
+
+@router.post("/scrape/run", summary="Ejecutar el bot scraper de forma manual")
+async def trigger_scraper(background_tasks: BackgroundTasks):
+    """
+    Inicia inmediatamente el ciclo de búsqueda de ofertas en segundo plano.
+    No bloquea la petición HTTP, retornando un mensaje de confirmación al instante.
+    """
+    background_tasks.add_task(run_automated_scraping_cycle)
+    return {"message": "El Cazador de Ofertas ha sido enviado a buscar en segundo plano. Los resultados aparecerán en la base de datos pronto."}
 
 @router.post("/products", response_model=ProductResponse, summary="Registrar nuevo término de búsqueda")
 async def create_product(product: ProductCreate, db: AsyncSession = Depends(get_db)):
