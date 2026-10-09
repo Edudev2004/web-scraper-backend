@@ -1,4 +1,4 @@
-# Entornos virtuales
+﻿# Entornos virtuales
 venv/
 env/
 .env
@@ -8,7 +8,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Archivos de datos e inicialización según solicitud
+# Archivos de datos e inicializaciÃ³n segÃºn solicitud
 *.pdf
 *.sql
 
@@ -24,3 +24,5 @@ Thumbs.db
 
 # Logs
 *.log
+
+.agents/
