@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func
 from sqlalchemy.future import select
 from typing import List
 
 from app.db.database import get_db
-from app.models.models import Product, ScrapingLog, Brand, ProductCategory
+from app.models.models import Product, ScrapingLog, Brand, ProductCategory, Vendor, Currency, VendorCatalog
 from app.schemas.schemas import (
     ProductCreate, 
     ProductResponse, 
@@ -12,7 +13,11 @@ from app.schemas.schemas import (
     BrandCreate, 
     BrandResponse, 
     CategoryCreate, 
-    CategoryResponse
+    CategoryResponse,
+    CurrencyResponse,
+    VendorCreate,
+    VendorUpdate,
+    VendorResponse
 )
 from app.scraper.workflow import run_automated_scraping_cycle
 
@@ -87,20 +92,48 @@ async def update_product(product_id: int, product_data: ProductCreate, db: Async
     await db.refresh(product)
     return product
 
-@router.get("/deals", summary="Obtener las mejores ofertas capturadas")
+@router.get("/deals", response_model=List[DealResponse], summary="Obtener las mejores ofertas capturadas")
 async def get_best_deals(db: AsyncSession = Depends(get_db)):
-    # Limitando a los ultimos 50 logs por ahora
-    query = select(ScrapingLog).order_by(ScrapingLog.scraped_at.desc()).limit(50)
+    query = (
+        select(
+            ScrapingLog.log_id,
+            ScrapingLog.scraped_at,
+            ScrapingLog.price_original,
+            ScrapingLog.price_usd,
+            ScrapingLog.stock_status,
+            ScrapingLog.raw_data,
+            Product.product_name,
+            Vendor.vendor_name,
+            VendorCatalog.product_url,
+            Currency.currency_code,
+            Currency.symbol.label("currency_symbol")
+        )
+        .join(VendorCatalog, ScrapingLog.catalog_id == VendorCatalog.catalog_id)
+        .join(Product, VendorCatalog.product_id == Product.product_id)
+        .join(Vendor, VendorCatalog.vendor_id == Vendor.vendor_id)
+        .outerjoin(Currency, ScrapingLog.currency_id == Currency.currency_id)
+        .order_by(ScrapingLog.scraped_at.desc())
+        .limit(50)
+    )
     result = await db.execute(query)
-    logs = result.scalars().all()
+    rows = result.all()
     
     deals = []
-    for log in logs:
+    for r in rows:
+        url = (r.raw_data or {}).get("url") if isinstance(r.raw_data, dict) else r.product_url
+        offer_title = (r.raw_data or {}).get("name") if isinstance(r.raw_data, dict) else None
         deals.append({
-            "log_id": log.log_id,
-            "scraped_at": log.scraped_at,
-            "price_usd": float(log.price_usd),
-            "stock_status": log.stock_status.value
+            "log_id": r.log_id,
+            "scraped_at": r.scraped_at,
+            "price_original": float(r.price_original),
+            "currency_code": r.currency_code or "USD",
+            "currency_symbol": r.currency_symbol or "$",
+            "price_usd": float(r.price_usd),
+            "stock_status": r.stock_status.value if hasattr(r.stock_status, 'value') else str(r.stock_status),
+            "product_name": r.product_name,
+            "vendor_name": r.vendor_name,
+            "product_url": url,
+            "offer_title": offer_title
         })
         
     return deals
@@ -161,3 +194,126 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail="No se puede eliminar esta categoría porque está asignada a uno o más objetivos.")
+
+# ==========================================
+# ENDPOINTS DE MONEDAS (CURRENCIES)
+# ==========================================
+
+@router.get("/currencies", response_model=List[CurrencyResponse], summary="Obtener catálogo de monedas")
+async def get_currencies(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Currency).order_by(Currency.currency_id))
+    return result.scalars().all()
+
+# ==========================================
+# ENDPOINTS DE PROVEEDORES (VENDORS)
+# ==========================================
+
+@router.get("/vendors", response_model=List[VendorResponse], summary="Obtener todos los proveedores")
+async def get_vendors(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Vendor).order_by(Vendor.vendor_id))
+    vendors = result.scalars().all()
+    
+    # Contar registros de catálogos vinculados a cada proveedor
+    counts_res = await db.execute(
+        select(VendorCatalog.vendor_id, func.count(VendorCatalog.catalog_id))
+        .group_by(VendorCatalog.vendor_id)
+    )
+    catalog_counts = dict(counts_res.all())
+    
+    # Estrategias reales implementadas en el motor
+    from app.scraper.engine import scraper_engine
+    def normalize_name(s: str) -> str:
+        return s.lower().replace(" ", "").replace("ú", "u").replace("é", "e").replace("á", "a").replace("í", "i").replace("ó", "o")
+    available_drivers = [normalize_name(k) for k in scraper_engine._strategies.keys()]
+    
+    response = []
+    for v in vendors:
+        v_dict = {
+            "vendor_id": v.vendor_id,
+            "vendor_name": v.vendor_name,
+            "country_code": v.country_code,
+            "website": v.website,
+            "contact_email": v.contact_email,
+            "default_currency_id": v.default_currency_id,
+            "is_active": v.is_active,
+            "created_at": v.created_at,
+            "currency": v.currency,
+            "total_catalogs": catalog_counts.get(v.vendor_id, 0),
+            "has_driver": normalize_name(v.vendor_name) in available_drivers
+        }
+        response.append(v_dict)
+    return response
+
+@router.post("/vendors", response_model=VendorResponse, summary="Registrar nuevo proveedor")
+async def create_vendor(vendor_in: VendorCreate, db: AsyncSession = Depends(get_db)):
+    # Validar que no exista un proveedor con el mismo nombre
+    existing = await db.execute(select(Vendor).where(Vendor.vendor_name == vendor_in.vendor_name))
+    if existing.scalars().first():
+        raise HTTPException(status_code=400, detail=f"Ya existe un proveedor registrado con el nombre '{vendor_in.vendor_name}'")
+    
+    new_vendor = Vendor(
+        vendor_name=vendor_in.vendor_name,
+        country_code=vendor_in.country_code.upper(),
+        website=vendor_in.website,
+        contact_email=vendor_in.contact_email,
+        default_currency_id=vendor_in.default_currency_id,
+        is_active=vendor_in.is_active
+    )
+    db.add(new_vendor)
+    await db.commit()
+    await db.refresh(new_vendor)
+    return new_vendor
+
+@router.put("/vendors/{vendor_id}", response_model=VendorResponse, summary="Actualizar información de proveedor")
+async def update_vendor(vendor_id: int, vendor_data: VendorUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Vendor).where(Vendor.vendor_id == vendor_id))
+    vendor = result.scalars().first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+        
+    if vendor_data.vendor_name is not None:
+        vendor.vendor_name = vendor_data.vendor_name
+    if vendor_data.country_code is not None:
+        vendor.country_code = vendor_data.country_code.upper()
+    if vendor_data.website is not None:
+        vendor.website = vendor_data.website
+    if vendor_data.contact_email is not None:
+        vendor.contact_email = vendor_data.contact_email
+    if vendor_data.default_currency_id is not None:
+        vendor.default_currency_id = vendor_data.default_currency_id
+    if vendor_data.is_active is not None:
+        vendor.is_active = vendor_data.is_active
+        
+    await db.commit()
+    await db.refresh(vendor)
+    return vendor
+
+@router.patch("/vendors/{vendor_id}/status", response_model=VendorResponse, summary="Alternar estado activo/inactivo de proveedor")
+async def toggle_vendor_status(vendor_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Vendor).where(Vendor.vendor_id == vendor_id))
+    vendor = result.scalars().first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+        
+    vendor.is_active = not vendor.is_active
+    await db.commit()
+    await db.refresh(vendor)
+    return vendor
+
+@router.delete("/vendors/{vendor_id}", summary="Eliminar o dar de baja a un proveedor")
+async def delete_vendor(vendor_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Vendor).where(Vendor.vendor_id == vendor_id))
+    vendor = result.scalars().first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+        
+    try:
+        await db.delete(vendor)
+        await db.commit()
+        return {"message": "Proveedor eliminado exitosamente"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar este proveedor porque tiene catálogos o registros de scraping históricos vinculados. Puedes desactivarlo en su lugar."
+        )

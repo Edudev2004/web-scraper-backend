@@ -64,6 +64,8 @@ class Vendor(Base):
     default_currency_id = Column(SmallInteger, ForeignKey('currencies.currency_id'), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    currency = relationship("Currency", lazy="joined")
 
 class VendorCatalog(Base):
     __tablename__ = 'vendor_catalog'
@@ -87,7 +89,7 @@ class ScrapingLog(Base):
     currency_id = Column(SmallInteger, ForeignKey('currencies.currency_id'), nullable=False)
     exchange_rate_id = Column(BigInteger, ForeignKey('exchange_rates.exchange_rate_id'), nullable=False)
     price_usd = Column(Numeric(18, 4), nullable=False)
-    stock_status = Column(Enum(StockStatus), nullable=False, default=StockStatus.UNKNOWN)
+    stock_status = Column(Enum(StockStatus, name="stock_status_t", create_type=False), nullable=False, default=StockStatus.UNKNOWN)
     stock_quantity = Column(Integer)
     http_status_code = Column(SmallInteger)
     scraping_ms = Column(Integer)
