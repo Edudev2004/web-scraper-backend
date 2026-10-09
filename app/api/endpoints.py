@@ -4,8 +4,16 @@ from sqlalchemy.future import select
 from typing import List
 
 from app.db.database import get_db
-from app.models.models import Product, ScrapingLog
-from app.schemas.schemas import ProductCreate, ProductResponse, DealResponse
+from app.models.models import Product, ScrapingLog, Brand, ProductCategory
+from app.schemas.schemas import (
+    ProductCreate, 
+    ProductResponse, 
+    DealResponse, 
+    BrandCreate, 
+    BrandResponse, 
+    CategoryCreate, 
+    CategoryResponse
+)
 from app.scraper.workflow import run_automated_scraping_cycle
 
 router = APIRouter()
@@ -31,7 +39,8 @@ async def create_product(product: ProductCreate, db: AsyncSession = Depends(get_
             brand_id=product.brand_id,
             category_id=product.category_id,
             model_number=product.model_number,
-            part_number=product.part_number
+            part_number=product.part_number,
+            description=product.description
         )
         
         db.add(new_product)
@@ -72,6 +81,7 @@ async def update_product(product_id: int, product_data: ProductCreate, db: Async
     product.category_id = product_data.category_id
     product.model_number = product_data.model_number
     product.part_number = product_data.part_number
+    product.description = product_data.description
     
     await db.commit()
     await db.refresh(product)
@@ -94,3 +104,60 @@ async def get_best_deals(db: AsyncSession = Depends(get_db)):
         })
         
     return deals
+
+
+@router.get("/brands", response_model=List[BrandResponse], summary="Obtener todas las marcas")
+async def get_brands(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Brand))
+    return result.scalars().all()
+
+@router.post("/brands", response_model=BrandResponse, summary="Crear una nueva marca")
+async def create_brand(brand: BrandCreate, db: AsyncSession = Depends(get_db)):
+    new_brand = Brand(brand_name=brand.brand_name)
+    db.add(new_brand)
+    await db.commit()
+    await db.refresh(new_brand)
+    return new_brand
+
+@router.delete("/brands/{brand_id}", summary="Eliminar una marca")
+async def delete_brand(brand_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Brand).where(Brand.brand_id == brand_id))
+    brand = result.scalars().first()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Marca no encontrada")
+    
+    try:
+        await db.delete(brand)
+        await db.commit()
+        return {"message": "Marca eliminada exitosamente"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="No se puede eliminar esta marca porque está asignada a uno o más objetivos.")
+
+@router.get("/categories", response_model=List[CategoryResponse], summary="Obtener todas las categorias")
+async def get_categories(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ProductCategory))
+    return result.scalars().all()
+
+@router.post("/categories", response_model=CategoryResponse, summary="Crear una nueva categoria")
+async def create_category(cat: CategoryCreate, db: AsyncSession = Depends(get_db)):
+    new_cat = ProductCategory(category_name=cat.category_name)
+    db.add(new_cat)
+    await db.commit()
+    await db.refresh(new_cat)
+    return new_cat
+
+@router.delete("/categories/{category_id}", summary="Eliminar una categoria")
+async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ProductCategory).where(ProductCategory.category_id == category_id))
+    category = result.scalars().first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada")
+    
+    try:
+        await db.delete(category)
+        await db.commit()
+        return {"message": "Categoría eliminada exitosamente"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="No se puede eliminar esta categoría porque está asignada a uno o más objetivos.")
