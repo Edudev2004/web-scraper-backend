@@ -3,6 +3,8 @@ from typing import Dict
 from .base_strategy import BaseScraperStrategy
 from .vendors.mercadolibre import MercadoLibreScraper
 from .vendors.amazon import AmazonScraper
+from .vendors.legrand import LegrandScraper
+from .vendors.wesco_anixter import WescoAnixterScraper
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,7 +18,9 @@ class ScraperEngine:
         # Aquí registramos los proveedores disponibles.
         self._strategies: Dict[str, BaseScraperStrategy] = {
             "MercadoLibre": MercadoLibreScraper(),
-            "Amazon": AmazonScraper()
+            "Amazon": AmazonScraper(),
+            "Legrand Perú": LegrandScraper(),
+            "Wesco Anixter": WescoAnixterScraper()
         }
 
     async def search_all_vendors(self, query: str) -> Dict[str, list]:
