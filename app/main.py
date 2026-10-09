@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from app.scraper.workflow import start_scheduler
+from app.api.endpoints import router as api_router
 
 app = FastAPI(
     title="web-scraper-cirion API",
     description="Backend para el Web Scraper de componentes IT de Cirion Technologies",
     version="1.0.0"
 )
+
+# Conectando las rutas creadas
+app.include_router(api_router, prefix="/api")
 
 @app.on_event("startup")
 async def startup_event():
